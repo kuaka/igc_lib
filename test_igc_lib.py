@@ -3,6 +3,74 @@ import unittest
 import igc_lib
 
 
+class TestBuildFromBRecord(unittest.TestCase):
+
+    def setUp(self):
+        self.test_record = 'B1227484612592N01249579EA0043700493extra-3s'
+        self.test_index = 10
+
+    def testBasicBRecordParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+        self.assertIsNotNone(b_record)
+
+    def testRawimeParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # 12:27:48, from B "122748" 4612592N01249579EA0043700493extra-3s
+        expected_time = 48.0            # seconds
+        expected_time += 60.0 * 27.0    # minutes
+        expected_time += 3600.0 * 12.0  # hours
+        self.assertAlmostEqual(expected_time, b_record.rawtime)
+
+    def testLatParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # 46* 12.592' N, from B122748 "4612592N" 01249579EA0043700493extra-3s
+        expected_lat = 12.592 / 60.0  # minutes
+        expected_lat += 46.0          # degrees
+        self.assertAlmostEqual(expected_lat, b_record.lat)
+
+    def testLonParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # 012* 49.579' E, from B1227484612592N "01249579E" A0043700493extra-3s
+        expected_lon = 49.579 / 60.0  # minutes
+        expected_lon += 12.0          # degrees
+        self.assertAlmostEqual(expected_lon, b_record.lon)
+
+    def testValidityParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # "A", from B1227484612592N01249579E "A" 0043700493extra-3s
+        self.assertEqual("A", b_record.validity)
+
+    def testPressureAltParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # 437 meters, from B1227484612592N01249579EA "00437" 00493extra-3s
+        self.assertEqual(437.0, b_record.press_alt)
+
+    def testGNSSAltParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # 493 meters, from B1227484612592N01249579EA00437 "00493" extra-3s
+        self.assertEqual(493.0, b_record.gnss_alt)
+
+    def testExtrasParse(self):
+        b_record = igc_lib.GNSSFix.build_from_B_record(
+            self.test_record, self.test_index)
+
+        # "extra-3s", from B1227484612592N01249579EA0043700493 "extra-3s"
+        self.assertEqual("extra-3s", b_record.extras)
+
+
 class TestNapretTaskParsing(unittest.TestCase):
 
     def setUp(self):
@@ -41,8 +109,8 @@ class TestNapretFlightParsing(unittest.TestCase):
         self.flight = igc_lib.Flight.create_from_file(test_file)
 
     def testFileParsesOK(self):
-        self.assertTrue(self.flight.valid)
         self.assertListEqual(self.flight.notes, [])
+        self.assertTrue(self.flight.valid)
 
     def testBothPressureSensorsAreOK(self):
         self.assertTrue(self.flight.press_alt_valid)
@@ -128,6 +196,21 @@ class TestNapretFlightParsing(unittest.TestCase):
             self.assertLessEqual(glide.exit_fix.index, landing_index)
 
 
+class TestNewIGCDateIncrement(unittest.TestCase):
+
+    def setUp(self):
+        test_file = "testfiles/new_date_format.igc"
+        self.flight = igc_lib.Flight.create_from_file(test_file)
+
+    def testFileParsesOK(self):
+        self.assertListEqual(self.flight.notes, [])
+        self.assertTrue(self.flight.valid)
+
+    def testDateIsReadCorrectly(self):
+        # 2018-04-03 0:00 UTC
+        self.assertAlmostEqual(self.flight.date_timestamp, 1522713600.0)
+
+
 class TestNoTimeIncrementFlightParsing(unittest.TestCase):
 
     def setUp(self):
@@ -135,8 +218,8 @@ class TestNoTimeIncrementFlightParsing(unittest.TestCase):
         self.flight = igc_lib.Flight.create_from_file(test_file)
 
     def testFileParsesOK(self):
-        self.assertTrue(self.flight.valid)
         self.assertListEqual(self.flight.notes, [])
+        self.assertTrue(self.flight.valid)
 
     def testBRecordsParsing(self):
         # There are 200 B records in the file, but the last
@@ -151,8 +234,8 @@ class TestOlsztynFlightParsing(unittest.TestCase):
         self.flight = igc_lib.Flight.create_from_file(test_file)
 
     def testFileParsesOK(self):
-        self.assertTrue(self.flight.valid)
         self.assertListEqual(self.flight.notes, [])
+        self.assertTrue(self.flight.valid)
 
     def testMetadataIsCorrectlyRead(self):
         self.assertEqual(self.flight.fr_manuf_code, 'LXN')
@@ -185,5 +268,45 @@ class TestNewZealandFlightParsing(unittest.TestCase):
         self.flight = igc_lib.Flight.create_from_file(test_file)
 
     def testFileParsesOK(self):
-        self.assertTrue(self.flight.valid)
         self.assertListEqual(self.flight.notes, [])
+        self.assertTrue(self.flight.valid)
+
+
+class ParsePickFirst(igc_lib.FlightParsingConfig):
+    which_flight_to_pick = 'first'
+
+
+class ParsePickConcat(igc_lib.FlightParsingConfig):
+    which_flight_to_pick = 'concat'
+
+
+class TestWhichFlightToPick(unittest.TestCase):
+
+    def setUp(self):
+        self.test_file = 'testfiles/flight_with_middle_landing.igc'
+
+    def testFileParsesOKPickFirst(self):
+        flight = igc_lib.Flight.create_from_file(
+            self.test_file, config_class=ParsePickFirst)
+        self.assertListEqual(flight.notes, [])
+        self.assertTrue(flight.valid)
+
+    def testFileParsesOKPickConcat(self):
+        flight = igc_lib.Flight.create_from_file(
+            self.test_file, config_class=ParsePickConcat)
+        self.assertListEqual(flight.notes, [])
+        self.assertTrue(flight.valid)
+
+    def testConcatIsLongerThanFirst(self):
+        flight_first = igc_lib.Flight.create_from_file(
+            self.test_file, config_class=ParsePickFirst)
+        flight_concat = igc_lib.Flight.create_from_file(
+            self.test_file, config_class=ParsePickConcat)
+        # Takeoff is the same
+        self.assertEqual(
+            flight_first.takeoff_fix.timestamp,
+            flight_concat.takeoff_fix.timestamp)
+        # But landing is earlier
+        self.assertLess(
+            flight_first.landing_fix.timestamp,
+            flight_concat.landing_fix.timestamp)
